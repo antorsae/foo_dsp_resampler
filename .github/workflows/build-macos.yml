@@ -1,0 +1,71 @@
+name: build-macos
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "*.cpp"
+      - "*.h"
+      - "*.c"
+      - "*.mm"
+      - "rate/**"
+      - "lpc/**"
+      - "Mac/**"
+      - "Makefile"
+      - "third_party/foobar2000_sdk/**"
+      - ".github/workflows/build-macos.yml"
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build foobar2000 SDK libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK=third_party/foobar2000_sdk
+          xcodebuild -project "$SDK/pfc/pfc.xcodeproj"                  -target pfc-Mac                  -configuration Release build -quiet
+          xcodebuild -project "$SDK/foobar2000/SDK/foobar2000_SDK.xcodeproj" -target foobar2000_SDK       -configuration Release build -quiet
+          xcodebuild -project "$SDK/foobar2000/helpers/foobar2000_SDK_helpers.xcodeproj" -target foobar2000_SDK_helpers -configuration Release build -quiet
+          xcodebuild -project "$SDK/foobar2000/shared/shared.xcodeproj"  -target shared                   -configuration Release build -quiet
+          xcodebuild -project "$SDK/foobar2000/foobar2000_component_client/foobar2000_component_client.xcodeproj" -target foobar2000_component_client -configuration Release build -quiet
+
+      - name: Build plugin (Release universal)
+        shell: bash
+        run: |
+          set -euo pipefail
+          make universal
+
+      - name: Verify universal binary
+        shell: bash
+        run: |
+          lipo -info build/foo_dsp_resampler
+          file build/foo_dsp_resampler
+
+      - name: Package .component and .fb2k-component
+        shell: bash
+        run: |
+          set -euo pipefail
+          outDir="$GITHUB_WORKSPACE/dist/macos-universal"
+          mkdir -p "$outDir"
+
+          # Copy the .component bundle
+          ditto build/foo_dsp_resampler.component "$outDir/foo_dsp_resampler.component"
+
+          # Copy license
+          if [ -d License ]; then
+            cp -R License "$outDir/"
+          fi
+
+          # Create .fb2k-component (zip)
+          (cd "$outDir" && ditto -c -k --sequesterRsrc --keepParent foo_dsp_resampler.component foo_dsp_resampler-macos-universal.zip)
+          mv "$outDir/foo_dsp_resampler-macos-universal.zip" "$outDir/foo_dsp_resampler-macos-universal.fb2k-component"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: foo_dsp_resampler-macos
+          path: dist/**

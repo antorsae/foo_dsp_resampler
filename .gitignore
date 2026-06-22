@@ -1,0 +1,34 @@
+# Build artifacts
+build/
+*.o
+*.obj
+*.lib
+*.pdb
+*.ilk
+*.exp
+
+# Windows build output
+Release/
+Debug/
+x64/
+ARM/
+ARM64/
+
+# macOS build output
+*.component
+*.dylib
+.DS_Store
+
+# SDK build artifacts
+third_party/foobar2000_sdk/**/build/
+
+# IDE files
+.vs/
+*.user
+*.suo
+.vscode/
+*.xcworkspace/xcuserdata/
+
+# Downloaded archives
+*.zip
+*.7z

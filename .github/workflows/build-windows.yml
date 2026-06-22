@@ -1,0 +1,97 @@
+name: build-windows
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "*.cpp"
+      - "*.h"
+      - "*.c"
+      - "rate/**"
+      - "lpc/**"
+      - "foo_dsp_resampler.sln"
+      - "foo_dsp_resampler.vcxproj"
+      - "rate/rate.vcxproj"
+      - "third_party/foobar2000_sdk/**"
+      - ".github/workflows/build-windows.yml"
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        platform: [x64, Win32, ARM64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Checkout WTL headers
+        uses: actions/checkout@v4
+        with:
+          repository: Win32-WTL/WTL
+          path: third_party/wtl
+          fetch-depth: 1
+
+      - name: Ensure ATL headers
+        shell: pwsh
+        run: |
+          $vsPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -products * -requires Microsoft.Component.MSBuild -property installationPath -latest
+          if (-not $vsPath) { throw "Visual Studio not found." }
+          & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe" modify --installPath $vsPath --add Microsoft.VisualStudio.Component.VC.ATL --add Microsoft.VisualStudio.Component.VC.ATLMFC --quiet --norestart
+          $exit = $LASTEXITCODE
+          if ($exit -ne 0 -and $exit -ne 3010) { exit $exit }
+
+      - name: Build foo_dsp_resampler (Release ${{ matrix.platform }})
+        shell: pwsh
+        run: |
+          $wtlInclude = Join-Path $env:GITHUB_WORKSPACE "third_party\wtl\Include"
+          $flags = @("/permissive")
+          if (Test-Path (Join-Path $wtlInclude "atlapp.h")) {
+            $flags += "/I`"$wtlInclude`""
+          }
+          if ([string]::IsNullOrEmpty($env:CL)) {
+            $env:CL = ($flags -join " ")
+          } else {
+            $env:CL = "$env:CL " + ($flags -join " ")
+          }
+          msbuild foo_dsp_resampler.sln /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:PlatformToolset=v143 /m
+
+      - name: Locate and package DLL
+        shell: pwsh
+        run: |
+          $platform = "${{ matrix.platform }}"
+          $configDir = if ($platform -eq "Win32") { "Release" } else { "$platform\Release" }
+          $dll = Join-Path $env:GITHUB_WORKSPACE "$configDir\foo_dsp_resampler.dll"
+          if (-not (Test-Path $dll)) {
+            # fallback: search recursively
+            $dll = (Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter "foo_dsp_resampler.dll" -Recurse | Where-Object { $_.FullName -match "Release" } | Select-Object -First 1).FullName
+          }
+          if (-not $dll) { throw "DLL not found" }
+          Write-Host "Found DLL: $dll"
+
+          $outDir = Join-Path $env:GITHUB_WORKSPACE "dist\win-$platform"
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+          Copy-Item -Path $dll -Destination (Join-Path $outDir "foo_dsp_resampler.dll") -Force
+
+          # Copy license
+          $licenseDir = Join-Path $env:GITHUB_WORKSPACE "License"
+          if (Test-Path $licenseDir) {
+            Copy-Item -Path $licenseDir -Destination $outDir -Recurse -Force
+          }
+
+          # Package as .fb2k-component (zip)
+          $zip = Join-Path $outDir "foo_dsp_resampler-win-$platform.zip"
+          if (Test-Path $zip) { Remove-Item $zip }
+          Compress-Archive -Path (Join-Path $outDir "*") -DestinationPath $zip
+          $component = Join-Path $outDir "foo_dsp_resampler-win-$platform.fb2k-component"
+          if (Test-Path $component) { Remove-Item $component }
+          Rename-Item -Path $zip -NewName (Split-Path $component -Leaf)
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: foo_dsp_resampler-win-${{ matrix.platform }}
+          path: dist/**
