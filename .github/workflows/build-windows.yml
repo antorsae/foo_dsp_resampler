@@ -35,14 +35,20 @@ jobs:
           path: third_party/wtl
           fetch-depth: 1
 
-      - name: Ensure ATL headers
+      - name: Ensure ATL/MFC components
         shell: pwsh
         run: |
           $vsPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -products * -requires Microsoft.Component.MSBuild -property installationPath -latest
           if (-not $vsPath) { throw "Visual Studio not found." }
-          & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe" modify --installPath $vsPath --add Microsoft.VisualStudio.Component.VC.ATL --add Microsoft.VisualStudio.Component.VC.ATLMFC --quiet --norestart
-          $exit = $LASTEXITCODE
-          if ($exit -ne 0 -and $exit -ne 3010) { exit $exit }
+          $platform = "${{ matrix.platform }}"
+          $components = @("Microsoft.VisualStudio.Component.VC.ATL", "Microsoft.VisualStudio.Component.VC.ATLMFC")
+          if ($platform -eq "ARM64") {
+            $components = @("Microsoft.VisualStudio.Component.VC.ARMA64.ATL", "Microsoft.VisualStudio.Component.VC.ARMA64.ATLMFC")
+          }
+          $args = @("modify", "--installPath", $vsPath, "--quiet", "--norestart")
+          foreach ($c in $components) { $args += "--add"; $args += $c }
+          $proc = Start-Process -FilePath "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe" -ArgumentList $args -Wait -PassThru -NoNewWindow
+          Write-Host "VS installer exit code: $($proc.ExitCode)"
 
       - name: Build foo_dsp_resampler (Release ${{ matrix.platform }})
         shell: pwsh

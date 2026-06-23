@@ -9,7 +9,7 @@
 # Paths
 SDK_DIR   ?= third_party/foobar2000_sdk
 SRC_DIR    = .
-BUILD_DIR  = build
+BUILD_DIR  = build$(BUILD_SUFFIX)
 
 # SDK static libraries (must be built first)
 SDK_LIBS = \
@@ -19,13 +19,15 @@ SDK_LIBS = \
 	$(SDK_DIR)/foobar2000/shared/build/Release/libshared.a \
 	$(SDK_DIR)/foobar2000/foobar2000_component_client/build/Release/libfoobar2000_component_client.a
 
-# Compiler / linker
-CC         = clang
-CXX        = clang++
-LD         = clang++
+# Compiler / linker (prefer system clang for cross-compilation support)
+CC         = /usr/bin/clang
+CXX        = /usr/bin/clang++
+LD         = /usr/bin/clang++
 
 # Architecture
 ARCH ?= arm64
+# Convert space-separated arch list to repeated -arch flags
+ARCH_FLAGS = $(patsubst %,-arch %,$(ARCH))
 
 # Common flags
 DEPLOY_TARGET = 11.0
@@ -44,7 +46,7 @@ CPPFLAGS = \
 
 CFLAGS = \
 	-std=gnu11 \
-	-arch $(ARCH) \
+	$(ARCH_FLAGS) \
 	-mmacosx-version-min=$(DEPLOY_TARGET) \
 	-fvisibility=hidden \
 	-O2 \
@@ -55,7 +57,7 @@ CFLAGS = \
 CXXFLAGS = \
 	-std=gnu++20 \
 	-stdlib=libc++ \
-	-arch $(ARCH) \
+	$(ARCH_FLAGS) \
 	-mmacosx-version-min=$(DEPLOY_TARGET) \
 	-fvisibility=hidden \
 	-fvisibility-inlines-hidden \
@@ -67,14 +69,14 @@ CXXFLAGS = \
 OBJCXXFLAGS = $(CXXFLAGS) -fobjc-arc
 
 LDFLAGS = \
-	-arch $(ARCH) \
+	$(ARCH_FLAGS) \
 	-mmacosx-version-min=$(DEPLOY_TARGET) \
 	-bundle \
 	-framework Cocoa \
 	$(SDK_LIBS) \
 	-lc++
 
-# Source files (common - non-SSE)
+# Source files (common - non-SSE, compiled for all archs)
 C_SOURCES = \
 	main.c \
 	rate/rate_double.c \
@@ -86,13 +88,28 @@ C_SOURCES = \
 	rate/fft-float/rdft.c \
 	rate/xmalloc.c
 
-# SSE sources only on x86
-ifeq ($(findstring x86_64,$(ARCH)),x86_64)
-C_SOURCES += \
-	rate/rate_SSE.c \
+# SSE sources (x86_64 only)
+# Note: rdft_sse.c and rate_SSE.c excluded (need x86 assembly for ff_fft_calc_sse)
+SSE_C_SOURCES = \
 	rate/rate_SSE3.c \
-	rate/fft-double/fft4g_sse3.c \
-	rate/fft-float/rdft_sse.c
+	rate/fft-double/fft4g_sse3.c
+
+# SSE sources (x86_64 only) - always compiled with -arch x86_64
+SSE_CFLAGS = \
+	-std=gnu11 \
+	-arch x86_64 \
+	-mmacosx-version-min=$(DEPLOY_TARGET) \
+	-fvisibility=hidden \
+	-O2 \
+	-Wno-unused-function \
+	-Wno-unused-variable \
+	-Wno-unused-but-set-variable
+
+# Only include SSE objects when building for x86_64
+ifeq ($(findstring x86_64,$(ARCH)),x86_64)
+SSE_OBJS = $(patsubst %.c,$(BUILD_DIR)/sse/%.o,$(SSE_C_SOURCES))
+else
+SSE_OBJS =
 endif
 
 CXX_SOURCES = \
@@ -110,7 +127,7 @@ C_OBJS = $(patsubst %.c,$(BUILD_DIR)/%.o,$(C_SOURCES))
 CXX_OBJS = $(patsubst %.cpp,$(BUILD_DIR)/%.o,$(CXX_SOURCES))
 OBJCXX_OBJS = $(patsubst %.mm,$(BUILD_DIR)/%.o,$(OBJCXX_SOURCES))
 
-ALL_OBJS = $(C_OBJS) $(CXX_OBJS) $(OBJCXX_OBJS)
+ALL_OBJS = $(C_OBJS) $(CXX_OBJS) $(OBJCXX_OBJS) $(SSE_OBJS)
 
 # Output
 COMPONENT_NAME = foo_dsp_resampler.component
@@ -127,9 +144,21 @@ debug: CFLAGS += -g -O0
 debug: CXXFLAGS += -g -O0
 debug: $(BUNDLE_DIR)
 
-# Universal build
-universal: ARCH = arm64 x86_64
-universal: $(BUNDLE_DIR)
+# Universal build: build arm64 and x86_64 separately, then combine with lipo
+universal:
+	$(MAKE) ARCH=arm64  BUILD_SUFFIX=_arm64  build/foo_dsp_resampler_arm64
+	$(MAKE) ARCH=x86_64 BUILD_SUFFIX=_x86_64 build/foo_dsp_resampler_x86_64
+	@mkdir -p build/foo_dsp_resampler.component/Contents/MacOS
+	@mkdir -p build/foo_dsp_resampler.component/Contents/Resources
+	lipo -create build/foo_dsp_resampler_arm64 build/foo_dsp_resampler_x86_64 -output build/foo_dsp_resampler.component/Contents/MacOS/foo_dsp_resampler
+	@printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0">\n<dict>\n\t<key>CFBundleExecutable</key>\n\t<string>foo_dsp_resampler</string>\n\t<key>CFBundleIdentifier</key>\n\t<string>com.foobar2000.foo-dsp-resampler</string>\n\t<key>CFBundleName</key>\n\t<string>SoX Resampler</string>\n\t<key>CFBundlePackageType</key>\n\t<string>BNDL</string>\n\t<key>CFBundleVersion</key>\n\t<string>1.0</string>\n</dict>\n</plist>\n' > build/foo_dsp_resampler.component/Contents/Info.plist
+	@echo "Bundle is ready: build/foo_dsp_resampler.component"
+
+# Per-architecture binary (used by universal target via recursive make)
+build/foo_dsp_resampler_%: $(ALL_OBJS) $(SDK_LIBS)
+	@echo "Linking ($*)..."
+	@mkdir -p $(dir $@)
+	$(LD) $(LDFLAGS) $(ALL_OBJS) -o $@
 
 # Build SDK libraries if needed
 sdk-libs:
@@ -168,6 +197,11 @@ $(BUILD_DIR)/%.o: %.cpp
 $(BUILD_DIR)/%.o: %.mm
 	@mkdir -p $(dir $@)
 	$(CXX) $(CPPFLAGS) $(OBJCXXFLAGS) -c $< -o $@
+
+# SSE sources: always x86_64 only
+$(BUILD_DIR)/sse/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(SSE_CFLAGS) -c $< -o $@
 
 clean:
 	rm -rf $(BUILD_DIR)

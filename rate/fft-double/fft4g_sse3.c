@@ -10,10 +10,10 @@
 */
 
 #include "fft4g.h"
-#include "../xmalloc.h"
 
 #include <pmmintrin.h>
 #include <stdint.h>
+#include "../xmalloc.h"
 
 #define _mm_shuffle_lh(x, y) (_mm_shuffle_pd((x), (y), _MM_SHUFFLE2(0, 1)))
 

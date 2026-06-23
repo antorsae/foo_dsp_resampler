@@ -55,7 +55,7 @@ int RR_open(const RR_config* config, int nchannels, RR_handle** const handle)
     }
     else
     {
-#if defined(__i386__) || defined(__x86_64__)
+#if (defined(__i386__) || defined(__x86_64__)) && !defined(__APPLE__)
         if (haveSSE == 1)
             h = RR_ctor_SSE(config, nchannels);
         else
