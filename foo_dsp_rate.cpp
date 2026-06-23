@@ -96,6 +96,19 @@ void dsp_rate::on_endofplayback(abort_callback & p_abort) { flushwrite(); }
 void dsp_rate::reinit(unsigned sample_rate, unsigned channel_count, unsigned channel_map)
 {
     out_rate_ = cfg_.realrate(sample_rate);
+
+    // Guard against extreme conversion ratios that would crash the SoX rate
+    // library (FFT tables only go to 131072 points; very large ratios produce
+    // filter designs that overflow internal buffers).
+    {
+        unsigned lo = sample_rate < out_rate_ ? sample_rate : out_rate_;
+        unsigned hi = sample_rate < out_rate_ ? out_rate_ : sample_rate;
+        if (hi > lo * 64u) {
+            console::warning("SoX Resampler: extreme conversion ratio, skipping resampling");
+            out_rate_ = sample_rate;
+        }
+    }
+
     RR_quality quality = RR_norm;
     int bit_accuracy = 20;
     if (cfg_.quality <= Qbest_28) {
@@ -121,7 +134,14 @@ void dsp_rate::reinit(unsigned sample_rate, unsigned channel_count, unsigned cha
 
     const RR_config c = { sample_rate, out_rate_, double(cfg_.phase), double(cfg_.passband10) / 10.0, cfg_.allow_aliasing ? 1 : 0, quality, bit_accuracy };
 
-    rate_.open(&c, channel_count);
+    try {
+        rate_.open(&c, channel_count);
+    } catch (const std::bad_alloc&) {
+        console::error("SoX Resampler: out of memory initializing resampler, skipping");
+        out_rate_ = sample_rate;
+        const RR_config c2 = { sample_rate, sample_rate, double(cfg_.phase), double(cfg_.passband10) / 10.0, cfg_.allow_aliasing ? 1 : 0, quality, bit_accuracy };
+        rate_.open(&c2, channel_count);
+    }
 
     channel_count_ = channel_count; channel_map_ = channel_map; sample_rate_ = sample_rate;
     in_samples_accum_ = out_samples_gen_accum_ = 0;
