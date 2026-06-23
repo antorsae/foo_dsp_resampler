@@ -2,7 +2,7 @@
   <ItemDefinitionGroup>
     <ClCompile>
       <ConformanceMode>false</ConformanceMode>
-      <AdditionalIncludeDirectories>$(WTL_INCLUDE);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(WTL_INCLUDE);$(ATL_INCLUDE);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
 </Project>
