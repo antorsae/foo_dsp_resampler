@@ -1,4 +1,8 @@
 <Project>
+  <PropertyGroup>
+    <WholeProgramOptimization>false</WholeProgramOptimization>
+    <InterproceduralOptimization>false</InterproceduralOptimization>
+  </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
       <ConformanceMode>false</ConformanceMode>
