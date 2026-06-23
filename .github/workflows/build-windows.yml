@@ -39,7 +39,7 @@ jobs:
       - name: Verify ATL and set CL flags
         shell: pwsh
         run: |
-          $flags = @()
+          $flags = @("/permissive")
           # Find ATL include
           $vsPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
           $atlDirs = Get-ChildItem -Path (Join-Path $vsPath "VC\Tools\MSVC") -Directory | Sort-Object Name -Descending
