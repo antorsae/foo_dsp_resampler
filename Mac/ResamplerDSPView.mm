@@ -34,25 +34,30 @@ static NSArray *sSpecialModes;
 #else
     sQualities = @[@"Ultra 28 (168 dB)", @"High (120 dB)", @"Fast (96 dB)"];
 #endif
-    sSpecialModes = @[@"No special sample rate handling - normal operation",
+    sSpecialModes = @[@"No special handling",
                       @"Resample ONLY these rates:",
-                      @"Resample everything EXCEPT these rates:"];
+                      @"Resample EXCEPT these rates:"];
 }
 
 - (instancetype)init {
     self = [super initWithNibName:nil bundle:nil];
+    if (self) {
+        [self setPreferredContentSize:NSMakeSize(360, 300)];
+    }
     return self;
 }
 
 - (void)loadView {
-    NSView *view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 420, 360)];
+    NSView *view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 360, 300)];
+    [view setWantsLayer:YES];
+    view.layer.backgroundColor = [[NSColor windowBackgroundColor] CGColor];
 
-    CGFloat y = 330;
-    CGFloat labelW = 130, ctrlX = 140, ctrlW = 260, rowH = 26;
+    CGFloat y = 270;
+    CGFloat labelW = 110, ctrlX = 120, ctrlW = 220, rowH = 28;
 
     // Sample rate
     [self addLabel:@"Sample rate:" toView:view atY:y width:labelW];
-    _rateCombo = [[NSComboBox alloc] initWithFrame:NSMakeRect(ctrlX, y, ctrlW, 22)];
+    _rateCombo = [[NSComboBox alloc] initWithFrame:NSMakeRect(ctrlX, y, ctrlW, 24)];
     _rateCombo.dataSource = self;
     _rateCombo.completes = NO;
     _rateCombo.delegate = (id<NSComboBoxDelegate>)self;
@@ -62,13 +67,13 @@ static NSArray *sSpecialModes;
 
     // Quality
     [self addLabel:@"Quality:" toView:view atY:y width:labelW];
-    _qualCombo = [[NSComboBox alloc] initWithFrame:NSMakeRect(ctrlX, y, ctrlW, 22)];
+    _qualCombo = [[NSComboBox alloc] initWithFrame:NSMakeRect(ctrlX, y, ctrlW, 24)];
     [_qualCombo addItemsWithObjectValues:sQualities];
     [view addSubview:_qualCombo];
     y -= rowH;
 
     // Aliasing
-    _aliasCheckbox = [[NSButton alloc] initWithFrame:NSMakeRect(ctrlX, y, ctrlW, 18)];
+    _aliasCheckbox = [[NSButton alloc] initWithFrame:NSMakeRect(ctrlX, y, ctrlW, 20)];
     [_aliasCheckbox setButtonType:NSButtonTypeSwitch];
     [_aliasCheckbox setTitle:@"Allow aliasing/imaging"];
     [view addSubview:_aliasCheckbox];
@@ -76,13 +81,13 @@ static NSArray *sSpecialModes;
 
     // Passband
     [self addLabel:@"Passband:" toView:view atY:y width:labelW];
-    _passbandSlider = [[NSSlider alloc] initWithFrame:NSMakeRect(ctrlX, y, ctrlW - 60, 20)];
+    _passbandSlider = [[NSSlider alloc] initWithFrame:NSMakeRect(ctrlX, y, ctrlW - 55, 22)];
     [_passbandSlider setMinValue:minPassband10];
     [_passbandSlider setMaxValue:maxPassband10];
     [_passbandSlider setTarget:self];
     [_passbandSlider setAction:@selector(onSlider:)];
     [view addSubview:_passbandSlider];
-    _passbandLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(ctrlX + ctrlW - 55, y, 55, 20)];
+    _passbandLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(ctrlX + ctrlW - 50, y, 50, 22)];
     [_passbandLabel setBezeled:NO];
     [_passbandLabel setEditable:NO];
     [_passbandLabel setDrawsBackground:NO];
@@ -90,14 +95,14 @@ static NSArray *sSpecialModes;
     y -= rowH;
 
     // Phase
-    [self addLabel:@"Phase response:" toView:view atY:y width:labelW];
-    _phaseSlider = [[NSSlider alloc] initWithFrame:NSMakeRect(ctrlX, y, ctrlW - 60, 20)];
+    [self addLabel:@"Phase:" toView:view atY:y width:labelW];
+    _phaseSlider = [[NSSlider alloc] initWithFrame:NSMakeRect(ctrlX, y, ctrlW - 55, 22)];
     [_phaseSlider setMinValue:Pminimum];
     [_phaseSlider setMaxValue:Plinear];
     [_phaseSlider setTarget:self];
     [_phaseSlider setAction:@selector(onSlider:)];
     [view addSubview:_phaseSlider];
-    _phaseLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(ctrlX + ctrlW - 55, y, 55, 20)];
+    _phaseLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(ctrlX + ctrlW - 50, y, 50, 22)];
     [_phaseLabel setBezeled:NO];
     [_phaseLabel setEditable:NO];
     [_phaseLabel setDrawsBackground:NO];
@@ -105,17 +110,16 @@ static NSArray *sSpecialModes;
     y -= rowH;
 
     // Special mode
-    [self addLabel:@"Special rates:" toView:view atY:y width:labelW];
-    _specialModeCombo = [[NSComboBox alloc] initWithFrame:NSMakeRect(ctrlX, y, ctrlW, 22)];
+    [self addLabel:@"Special:" toView:view atY:y width:labelW];
+    _specialModeCombo = [[NSComboBox alloc] initWithFrame:NSMakeRect(ctrlX, y, ctrlW, 24)];
     [_specialModeCombo addItemsWithObjectValues:sSpecialModes];
     [view addSubview:_specialModeCombo];
     y -= rowH;
 
     // Special rates field
-    [self addLabel:@"Rates (e.g. 88200-96000):" toView:view atY:y width:labelW];
-    _specialRatesField = [[NSTextField alloc] initWithFrame:NSMakeRect(ctrlX, y, ctrlW, 22)];
+    [self addLabel:@"Rates:" toView:view atY:y width:labelW];
+    _specialRatesField = [[NSTextField alloc] initWithFrame:NSMakeRect(ctrlX, y, ctrlW, 24)];
     [view addSubview:_specialRatesField];
-    y -= rowH;
 
     self.view = view;
 }
@@ -188,6 +192,10 @@ static NSArray *sSpecialModes;
 }
 
 - (void)controlTextDidChange:(NSNotification *)notification {
+    [self apply];
+}
+
+- (void)comboBoxSelectionDidChange:(NSNotification *)notification {
     [self apply];
 }
 
