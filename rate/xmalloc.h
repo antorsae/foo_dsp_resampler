@@ -64,7 +64,13 @@ static __inline void * lsx_aligned_calloc(size_t n, size_t s)
     }
     return p;
 }
-static __inline void lsx_aligned_free(void * p) { free(p); }
+static __inline void lsx_aligned_free(void * p) {
+#ifdef _MSC_VER
+    _aligned_free(p);
+#else
+    free(p);
+#endif
+}
 
 /* #define DONT_USE(x) { enum {do_not_use_##x = 1/ }; } */
 #define malloc { enum {do_not_use_malloc = 1/ }; }
