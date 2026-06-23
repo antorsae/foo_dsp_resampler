@@ -18,7 +18,7 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2022
     strategy:
       matrix:
         platform: [x64, Win32, ARM64]
@@ -63,7 +63,7 @@ jobs:
           } else {
             $env:CL = "$env:CL " + ($flags -join " ")
           }
-          msbuild foo_dsp_resampler.sln /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:PlatformToolset=v143 /m
+          msbuild foo_dsp_resampler.sln /p:Configuration=Release /p:Platform=${{ matrix.platform }} /m
 
       - name: Locate and package DLL
         shell: pwsh

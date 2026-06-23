@@ -18,12 +18,17 @@
 #include "rate_i.h"
 #include "sox_i.h"
 
+/* x86 architecture detection (MSVC + GCC/Clang) */
+#if defined(_M_IX86) || defined(_M_X64) || defined(__i386__) || defined(__x86_64__)
+#define FB_X86 1
+#else
+#define FB_X86 0
+#endif
+
 #if defined(_MSC_VER)
 #include <intrin.h>
-#elif defined(__GNUC__) || defined(__clang__)
-#if defined(__i386__) || defined(__x86_64__)
+#elif FB_X86
 #include <cpuid.h>
-#endif
 #endif
 
 int haveSSE = -1;
@@ -44,7 +49,7 @@ int RR_open(const RR_config* config, int nchannels, RR_handle** const handle)
 
     if (config->quality == RR_best)
     {
-#if defined(__i386__) || defined(__x86_64__)
+#if FB_X86
         if (haveSSE3 == 1)
             h = RR_ctor_SSE3(config, nchannels);
         else
@@ -55,7 +60,7 @@ int RR_open(const RR_config* config, int nchannels, RR_handle** const handle)
     }
     else
     {
-#if (defined(__i386__) || defined(__x86_64__)) && !defined(__APPLE__)
+#if FB_X86 && !defined(__APPLE__)
         if (haveSSE == 1)
             h = RR_ctor_SSE(config, nchannels);
         else
@@ -141,13 +146,10 @@ static void init_SSEflags()
         haveSSE = 1;
     else
         haveSSE = 0;
-
-    //if (info[3] & (1 << 26)) {...} /* SSE2 */
 #elif defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
     haveSSE  = __builtin_cpu_supports("sse")  ? 1 : 0;
     haveSSE3 = __builtin_cpu_supports("sse3") ? 1 : 0;
 #else
-    /* Non-x86 platforms (e.g. ARM): no SSE/SSE3 available */
     haveSSE = 0;
     haveSSE3 = 0;
 #endif
@@ -160,7 +162,7 @@ static int init_fft4g()
     int i;
     int res = 0;
 
-#if defined(__i386__) || defined(__x86_64__)
+#if FB_X86
     if (haveSSE3 == 1)
     {
         lsx_rdft = lsx_rdft_SSE3;

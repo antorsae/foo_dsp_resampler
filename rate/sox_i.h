@@ -16,6 +16,13 @@
 
 #define CREATE_4X_NUMTAPS
 
+/* x86 architecture detection (MSVC + GCC/Clang) */
+#if defined(_M_IX86) || defined(_M_X64) || defined(__i386__) || defined(__x86_64__)
+#define FB_X86 1
+#else
+#define FB_X86 0
+#endif
+
 #if defined(_MSC_VER)
 #include <intrin.h>
 #pragma intrinsic(_BitScanReverse)
@@ -56,7 +63,7 @@ extern int  (*lsx_rdft_init)(int n, FFTcontext* z);
 
 static __inline void lsx_safe_rdft_SSE3(int n, int type, double * d, void * unused)
 {
-#if defined(__i386__) || defined(__x86_64__)
+#if FB_X86
     lsx_rdft_SSE3(type, d, fftx[dlog2(n)]);
 #else
     (void)n; (void)type; (void)d; (void)unused;
@@ -74,7 +81,7 @@ extern RDFTContext ff_bkd[18];
 
 static __inline void ff_rdft_SSE(int n, int type, float * d, FFTComplex * tmp_buf)
 {
-#if defined(__i386__) || defined(__x86_64__)
+#if FB_X86 && !defined(__APPLE__)
     ff_rdft_calc_sse( &( type==1 ? ff_fwd : ff_bkd )[dlog2(n)], d, tmp_buf );
 #else
     (void)n; (void)type; (void)d; (void)tmp_buf;

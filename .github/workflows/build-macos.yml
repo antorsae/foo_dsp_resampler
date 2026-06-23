@@ -42,8 +42,8 @@ jobs:
       - name: Verify universal binary
         shell: bash
         run: |
-          lipo -info build/foo_dsp_resampler
-          file build/foo_dsp_resampler
+          lipo -info build/foo_dsp_resampler.component/Contents/MacOS/foo_dsp_resampler
+          file build/foo_dsp_resampler.component/Contents/MacOS/foo_dsp_resampler
 
       - name: Package .component and .fb2k-component
         shell: bash
