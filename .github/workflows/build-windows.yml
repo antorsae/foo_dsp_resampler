@@ -29,6 +29,14 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
+      - name: Install NASM
+        shell: pwsh
+        run: choco install nasm -y --no-progress
+
+      - name: Add NASM to PATH
+        shell: pwsh
+        run: echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Append
+
       - name: Checkout WTL headers
         uses: actions/checkout@v4
         with:
