@@ -36,28 +36,30 @@ jobs:
           path: third_party/wtl
           fetch-depth: 1
 
-      - name: Verify ATL and set include paths
+      - name: Verify ATL and set CL flags
         shell: pwsh
         run: |
-          $vsPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
-          Write-Host "VS Path: $vsPath"
+          $flags = @()
           # Find ATL include
+          $vsPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
           $atlDirs = Get-ChildItem -Path (Join-Path $vsPath "VC\Tools\MSVC") -Directory | Sort-Object Name -Descending
           foreach ($d in $atlDirs) {
             $atlInclude = Join-Path $d.FullName "ATLMFC\include"
             if (Test-Path (Join-Path $atlInclude "atlbase.h")) {
-              Write-Host "Found ATL at: $atlInclude"
-              "INCLUDE=$env:INCLUDE;$atlInclude" | Out-File -FilePath $env:GITHUB_ENV -Append
-              "LIB=$env:LIB;$(Join-Path $d.FullName 'ATLMFC\lib\x64')" | Out-File -FilePath $env:GITHUB_ENV -Append
+              Write-Host "Found ATL: $atlInclude"
+              $flags += "/I`"$atlInclude`""
               break
             }
           }
           # WTL include
           $wtlInclude = Join-Path $env:GITHUB_WORKSPACE "third_party\wtl\Include"
           if (Test-Path (Join-Path $wtlInclude "atlapp.h")) {
-            "INCLUDE=$env:INCLUDE;$wtlInclude" | Out-File -FilePath $env:GITHUB_ENV -Append
-            Write-Host "Added WTL: $wtlInclude"
+            Write-Host "Found WTL: $wtlInclude"
+            $flags += "/I`"$wtlInclude`""
           }
+          $env:CL = ($flags -join " ")
+          Write-Host "CL=$env:CL"
+          "CL=$env:CL" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Build foo_dsp_resampler (Release ${{ matrix.platform }})
         shell: pwsh
