@@ -12,6 +12,8 @@ on:
       - "foo_dsp_resampler.sln"
       - "foo_dsp_resampler.vcxproj"
       - "rate/rate.vcxproj"
+      - "Directory.Build.props"
+      - "Directory.Build.targets"
       - "third_party/foobar2000_sdk/**"
       - ".github/workflows/build-windows.yml"
   pull_request:
