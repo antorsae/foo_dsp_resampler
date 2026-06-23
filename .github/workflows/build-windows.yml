@@ -36,35 +36,17 @@ jobs:
           path: third_party/wtl
           fetch-depth: 1
 
-      - name: Verify ATL and set CL flags
+      - name: Set WTL and ATL paths
         shell: pwsh
         run: |
-          $flags = @("/permissive")
-          # Find ATL include
-          $vsPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
-          $atlDirs = Get-ChildItem -Path (Join-Path $vsPath "VC\Tools\MSVC") -Directory | Sort-Object Name -Descending
-          foreach ($d in $atlDirs) {
-            $atlInclude = Join-Path $d.FullName "ATLMFC\include"
-            if (Test-Path (Join-Path $atlInclude "atlbase.h")) {
-              Write-Host "Found ATL: $atlInclude"
-              $flags += "/I`"$atlInclude`""
-              break
-            }
-          }
-          # WTL include
           $wtlInclude = Join-Path $env:GITHUB_WORKSPACE "third_party\wtl\Include"
-          if (Test-Path (Join-Path $wtlInclude "atlapp.h")) {
-            Write-Host "Found WTL: $wtlInclude"
-            $flags += "/I`"$wtlInclude`""
-          }
-          $env:CL = ($flags -join " ")
-          Write-Host "CL=$env:CL"
-          "CL=$env:CL" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "WTL_INCLUDE=$wtlInclude" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "WTL_INCLUDE=$wtlInclude"
 
       - name: Build foo_dsp_resampler (Release ${{ matrix.platform }})
         shell: pwsh
         run: |
-          msbuild foo_dsp_resampler.sln /p:Configuration=Release /p:Platform=${{ matrix.platform }} /m
+          msbuild foo_dsp_resampler.sln /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:WTL_INCLUDE="$env:WTL_INCLUDE" /m
 
       - name: Locate and package DLL
         shell: pwsh
