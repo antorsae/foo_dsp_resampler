@@ -36,34 +36,32 @@ jobs:
           path: third_party/wtl
           fetch-depth: 1
 
-      - name: Ensure ATL/MFC components
+      - name: Verify ATL and set include paths
         shell: pwsh
         run: |
-          $vsPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -products * -requires Microsoft.Component.MSBuild -property installationPath -latest
-          if (-not $vsPath) { throw "Visual Studio not found." }
-          $platform = "${{ matrix.platform }}"
-          $components = @("Microsoft.VisualStudio.Component.VC.ATL", "Microsoft.VisualStudio.Component.VC.ATLMFC")
-          if ($platform -eq "ARM64") {
-            $components = @("Microsoft.VisualStudio.Component.VC.ARMA64.ATL", "Microsoft.VisualStudio.Component.VC.ARMA64.ATLMFC")
+          $vsPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          Write-Host "VS Path: $vsPath"
+          # Find ATL include
+          $atlDirs = Get-ChildItem -Path (Join-Path $vsPath "VC\Tools\MSVC") -Directory | Sort-Object Name -Descending
+          foreach ($d in $atlDirs) {
+            $atlInclude = Join-Path $d.FullName "ATLMFC\include"
+            if (Test-Path (Join-Path $atlInclude "atlbase.h")) {
+              Write-Host "Found ATL at: $atlInclude"
+              "INCLUDE=$env:INCLUDE;$atlInclude" | Out-File -FilePath $env:GITHUB_ENV -Append
+              "LIB=$env:LIB;$(Join-Path $d.FullName 'ATLMFC\lib\x64')" | Out-File -FilePath $env:GITHUB_ENV -Append
+              break
+            }
           }
-          $args = @("modify", "--installPath", $vsPath, "--quiet", "--norestart")
-          foreach ($c in $components) { $args += "--add"; $args += $c }
-          $proc = Start-Process -FilePath "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe" -ArgumentList $args -Wait -PassThru -NoNewWindow
-          Write-Host "VS installer exit code: $($proc.ExitCode)"
+          # WTL include
+          $wtlInclude = Join-Path $env:GITHUB_WORKSPACE "third_party\wtl\Include"
+          if (Test-Path (Join-Path $wtlInclude "atlapp.h")) {
+            "INCLUDE=$env:INCLUDE;$wtlInclude" | Out-File -FilePath $env:GITHUB_ENV -Append
+            Write-Host "Added WTL: $wtlInclude"
+          }
 
       - name: Build foo_dsp_resampler (Release ${{ matrix.platform }})
         shell: pwsh
         run: |
-          $wtlInclude = Join-Path $env:GITHUB_WORKSPACE "third_party\wtl\Include"
-          $flags = @("/permissive")
-          if (Test-Path (Join-Path $wtlInclude "atlapp.h")) {
-            $flags += "/I`"$wtlInclude`""
-          }
-          if ([string]::IsNullOrEmpty($env:CL)) {
-            $env:CL = ($flags -join " ")
-          } else {
-            $env:CL = "$env:CL " + ($flags -join " ")
-          }
           msbuild foo_dsp_resampler.sln /p:Configuration=Release /p:Platform=${{ matrix.platform }} /m
 
       - name: Locate and package DLL
