@@ -24,7 +24,11 @@
 #define FFT_H
 
 #include <stdint.h>
+#ifdef _MSC_VER
+#include <malloc.h>
+#else
 #include <stdlib.h>
+#endif
 #define FF_ALIGN 32
 
 #ifdef __cplusplus
@@ -59,10 +63,14 @@ static __inline void *ff_malloc(unsigned int size)
 
 static __inline void ff_free(void *ptr)
 {
+#ifdef _MSC_VER
+    _aligned_free(ptr);
+#else
     free(ptr);
+#endif
 }
 
-static __inline void ff_freep(void* *ptr)
+static __inline void ff_freep(uint16_t **ptr)
 {
     ff_free(*ptr);
     *ptr = NULL;

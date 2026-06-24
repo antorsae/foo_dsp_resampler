@@ -76,7 +76,7 @@ protected:
 public:
     void flush() override;
     double get_latency() override;
-    bool need_track_change_mark() override { return false; }
+    bool need_track_change_mark() override { return true; }
 };
 
 #endif
