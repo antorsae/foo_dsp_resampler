@@ -143,6 +143,27 @@ void dsp_rate::reinit(unsigned sample_rate, unsigned channel_count, unsigned cha
         rate_.open(&c2, channel_count);
     }
 
+    // Log to console so user can verify resampler is active
+    if (out_rate_ != sample_rate) {
+        unsigned g = local_gcd(sample_rate, out_rate_);
+        unsigned L = out_rate_ / g;
+        unsigned M = sample_rate / g;
+        const char* qname = "normal";
+        if (quality == RR_best) qname = (bit_accuracy >= 53) ? "ultra-53" :
+                                       (bit_accuracy >= 47) ? "ultra-47" :
+                                       (bit_accuracy >= 37) ? "ultra-37" :
+                                       (bit_accuracy >= 28) ? "best" : "normal";
+        FB2K_console_formatter() << "SoX Resampler: " << sample_rate << " Hz -> "
+            << out_rate_ << " Hz  L/M=" << L << "/" << M
+            << "  quality=" << qname
+            << "  bw=" << (double)cfg_.passband10 / 10.0 << "%"
+            << "  phase=" << (int)cfg_.phase
+            << (cfg_.allow_aliasing ? "  aliasing=on" : "")
+            << "  ch=" << channel_count;
+    } else {
+        FB2K_console_formatter() << "SoX Resampler: passthrough (" << sample_rate << " Hz)";
+    }
+
     channel_count_ = channel_count; channel_map_ = channel_map; sample_rate_ = sample_rate;
     in_samples_accum_ = out_samples_gen_accum_ = 0;
 
