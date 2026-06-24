@@ -48,6 +48,17 @@ class dsp_rate : public dsp_impl_base_t<dsp_v2>
     unsigned int /* size_t*/ samples_dropped_;
     bool is_preextrapolated_;
 
+    // Stage-2 resampler: 93750→96000 Hz, active when output_as_96k workaround is on.
+    // Produces 96000 samples/sec output (surplus vs 93750 Hz ASIO consumption) to prevent
+    // buffer underruns. Pitch is preserved: digital freq = f/93750 survives both stages.
+    resampler_link rate2_;
+    fb_sample_t* out_buffer_2_;
+    unsigned OUTBUF_SIZE_2_;
+    bool two_stage_96k_;
+    unsigned N_samples_to_drop_2_;
+    unsigned samples_dropped_2_;
+    void flush_stage2();
+
     void ctor_init();
     bool set_data(const dsp_preset & p_data);
 
