@@ -13,3 +13,4 @@
 #define IDC_PHASETEXT                           1008
 #define IDC_SPECIALMODE                         1009
 #define IDC_SPECIALRATES                        1010
+#define IDC_OUTPUT_AS_96K                       1011

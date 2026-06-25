@@ -38,6 +38,7 @@ class dsp_rate : public dsp_impl_base_t<dsp_v2>
     unsigned int /* size_t*/ PRIME_LEN_;
 
     unsigned out_rate_;
+    unsigned tagged_rate_; // may differ from out_rate_ (93750 tagged as 96000 for ASIO)
     unsigned sample_rate_;
     unsigned channel_count_;
     unsigned channel_map_;
@@ -76,7 +77,7 @@ protected:
 public:
     void flush() override;
     double get_latency() override;
-    bool need_track_change_mark() override { return false; }
+    bool need_track_change_mark() override { return true; }
 };
 
 #endif

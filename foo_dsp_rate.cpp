@@ -29,11 +29,6 @@ static inline void throw_new_exception_() { throw std::bad_alloc(); }
 #endif
 extern "C" void throw_new_exception() { throw_new_exception_(); }
 
-// Persistent status bar override — created once, updated on every reinit()
-namespace {
-    service_ptr_t<ui_status_text_override> g_status_override;
-}
-
 #if fb_sample_t_bits == 64
 static const GUID guid_branch_playback_soxr = { 0x5ecae206, 0x7cfb, 0x46a2, { 0xbe, 0xad, 0xa, 0x3f, 0x1a, 0x27, 0x63, 0xa4 } };
 // {E8514B43-78DE-4878-9B09-661A9297AC3F}
@@ -56,6 +51,7 @@ void dsp_rate::ctor_init()
     PRIME_LEN_ = 0;
 
     out_rate_ = 0;
+    tagged_rate_ = 0;
     sample_rate_ = 0;
     channel_count_ = 0;
     channel_map_ = 0;
@@ -148,32 +144,27 @@ void dsp_rate::reinit(unsigned sample_rate, unsigned channel_count, unsigned cha
         rate_.open(&c2, channel_count);
     }
 
-    // Update status bar so user can see the resampler is active.
-    // Must be on main thread; reinit() runs on the decode thread.
-    {
-        pfc::string8 msg;
-        if (out_rate_ != sample_rate) {
-            unsigned gg = local_gcd(sample_rate, out_rate_);
-            unsigned Lr = out_rate_ / gg;
-            unsigned Mr = sample_rate / gg;
-            const char* qname = (quality == RR_best) ?
-                (bit_accuracy >= 53 ? "ultra-53" : bit_accuracy >= 47 ? "ultra-47" :
-                 bit_accuracy >= 37 ? "ultra-37" : bit_accuracy >= 28 ? "best" : "norm") : "norm";
-            msg << "SoX Resampler: " << sample_rate << " -> " << out_rate_
-                << " Hz  L/M=" << Lr << "/" << Mr
-                << "  " << qname
-                << "  " << channel_count << "ch";
-        } else {
-            msg << "SoX Resampler: passthrough (" << sample_rate << " Hz)";
-        }
-        fb2k::inMainThread([msg]() {
-            if (g_status_override.is_empty()) {
-                static_api_ptr_t<ui_control>()->override_status_text_create(g_status_override);
-            }
-            if (g_status_override.is_valid()) {
-                g_status_override->override_text(msg);
-            }
-        });
+    tagged_rate_ = (out_rate_ == 93750 && cfg_.output_as_96k) ? 96000 : out_rate_;
+
+    if (out_rate_ != sample_rate) {
+        unsigned g = local_gcd(sample_rate, out_rate_);
+        unsigned L = out_rate_ / g;
+        unsigned M = sample_rate / g;
+        const char* qname = "normal";
+        if (quality == RR_best) qname = (bit_accuracy >= 53) ? "ultra-53" :
+                                       (bit_accuracy >= 47) ? "ultra-47" :
+                                       (bit_accuracy >= 37) ? "ultra-37" :
+                                       (bit_accuracy >= 28) ? "best" : "normal";
+        FB2K_console_formatter() << "SoX Resampler: " << sample_rate << " Hz -> "
+            << out_rate_ << " Hz  L/M=" << L << "/" << M
+            << "  quality=" << qname
+            << "  bw=" << (double)cfg_.passband10 / 10.0 << "%"
+            << "  phase=" << (int)cfg_.phase
+            << (cfg_.allow_aliasing ? "  aliasing=on" : "")
+            << "  ch=" << channel_count
+            << (tagged_rate_ != out_rate_ ? "  [ASIO: chunks tagged as 96000 Hz]" : "");
+    } else {
+        FB2K_console_formatter() << "SoX Resampler: passthrough (" << sample_rate << " Hz)";
     }
 
     channel_count_ = channel_count; channel_map_ = channel_map; sample_rate_ = sample_rate;
@@ -288,9 +279,9 @@ bool dsp_rate::on_chunk(audio_chunk * chunk, abort_callback & p_abort)
             out_samples_gen_accum_ += (unsigned int)out_samples_gen;
             audio_chunk *out = insert_chunk(out_samples_gen*channel_count_);
 #if audio_sample_size == fb_sample_t_bits
-            out->set_data(out_buffer_ + to_drop*channel_count_, out_samples_gen, channel_count_, out_rate_, channel_map_);
+            out->set_data(out_buffer_ + to_drop*channel_count_, out_samples_gen, channel_count_, tagged_rate_, channel_map_);
 #else
-            out->set_data_32(out_buffer_ + to_drop * channel_count_, out_samples_gen, audio_chunk::makeSpec(out_rate_, channel_count_, channel_map_));
+            out->set_data_32(out_buffer_ + to_drop * channel_count_, out_samples_gen, audio_chunk::makeSpec(tagged_rate_, channel_count_, channel_map_));
 #endif
         }
     } while (sample_count || out_samples_gen);
@@ -327,9 +318,9 @@ void dsp_rate::flushwrite()
             out_samples_gen_accum_ += (unsigned int)out_samples_gen;
             audio_chunk * out = insert_chunk(out_samples_gen*channel_count_);
 #if audio_sample_size == fb_sample_t_bits
-            out->set_data(out_buffer_, out_samples_gen, channel_count_, out_rate_, channel_map_);
+            out->set_data(out_buffer_, out_samples_gen, channel_count_, tagged_rate_, channel_map_);
 #else
-            out->set_data_32(out_buffer_, out_samples_gen, audio_chunk::makeSpec(out_rate_, channel_count_, channel_map_));
+            out->set_data_32(out_buffer_, out_samples_gen, audio_chunk::makeSpec(tagged_rate_, channel_count_, channel_map_));
 #endif
         }
         close();
@@ -373,9 +364,9 @@ void dsp_rate::flushwrite()
                 out_samples_gen_accum_ += avail;
                 audio_chunk * out = insert_chunk(avail*channel_count_);
 #if audio_sample_size == fb_sample_t_bits
-                out->set_data(out_buffer_, avail, channel_count_, out_rate_, channel_map_);
+                out->set_data(out_buffer_, avail, channel_count_, tagged_rate_, channel_map_);
 #else
-                out->set_data_32(out_buffer_, avail, audio_chunk::makeSpec(out_rate_, channel_count_, channel_map_));
+                out->set_data_32(out_buffer_, avail, audio_chunk::makeSpec(tagged_rate_, channel_count_, channel_map_));
 #endif
                 samples_in_buffer_ -= avail; /* samples_in_buffer_ = N_samples_to_drop_ */
                 as_memmove2(out_buffer_, 0, out_buffer_, avail, samples_in_buffer_);
@@ -414,9 +405,9 @@ void dsp_rate::flushwrite()
                 out_samples_gen_accum_ += avail;
                 audio_chunk * out = insert_chunk(avail*channel_count_);
 #if audio_sample_size == fb_sample_t_bits
-                out->set_data(out_buffer_ + to_drop*channel_count_, avail, channel_count_, out_rate_, channel_map_);
+                out->set_data(out_buffer_ + to_drop*channel_count_, avail, channel_count_, tagged_rate_, channel_map_);
 #else
-                out->set_data_32(out_buffer_ + to_drop*channel_count_, avail, audio_chunk::makeSpec(out_rate_, channel_count_, channel_map_));
+                out->set_data_32(out_buffer_ + to_drop*channel_count_, avail, audio_chunk::makeSpec(tagged_rate_, channel_count_, channel_map_));
 #endif
                 samples_in_buffer_ -= avail; /* samples_in_buffer_ = N_samples_to_drop_ */
                 as_memmove2(out_buffer_, 0, out_buffer_, avail, samples_in_buffer_);

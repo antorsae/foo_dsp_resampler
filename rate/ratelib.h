@@ -84,6 +84,7 @@ extern "C" {
 #endif
 
 int init_ratelib(void (*alloc_error_handler)(void));
+void close_ratelib(void);
 
 int RR_open(const RR_config *config, int nchannels, RR_handle **const handle);
 int RR_flow(RR_handle *h, const fb_sample_t *ibuf, fb_sample_t *obuf, size_t isamp, size_t osamp, size_t *iused, size_t *ogen);

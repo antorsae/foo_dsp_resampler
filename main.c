@@ -26,7 +26,11 @@ BOOL WINAPI DllMain(HINSTANCE hinstDll, DWORD fdwReason, LPVOID lpvReserved)
     if (fdwReason == DLL_PROCESS_ATTACH)
     {
         int ret = init_ratelib(throw_new_exception);
-        //if (ret == -1) return FALSE;
+        if (ret != 0) return FALSE;
+    }
+    else if (fdwReason == DLL_PROCESS_DETACH && lpvReserved == NULL)
+    {
+        close_ratelib();
     }
     return TRUE;
 }

@@ -2,7 +2,6 @@
   <PropertyGroup>
     <WholeProgramOptimization>false</WholeProgramOptimization>
     <InterproceduralOptimization>false</InterproceduralOptimization>
-    <SharedLib Condition="'$(Platform)' == 'ARM64'">shared-ARM64EC</SharedLib>
-    <SharedLib Condition="'$(Platform)' != 'ARM64'">shared-$(Platform)</SharedLib>
+    <SharedLib>shared-$(Platform)</SharedLib>
   </PropertyGroup>
 </Project>

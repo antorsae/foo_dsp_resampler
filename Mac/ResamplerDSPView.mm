@@ -7,6 +7,7 @@
 @property (nonatomic, strong) NSComboBox *rateCombo;
 @property (nonatomic, strong) NSComboBox *qualCombo;
 @property (nonatomic, strong) NSButton *aliasCheckbox;
+@property (nonatomic, strong) NSButton *output96kCheckbox;
 @property (nonatomic, strong) NSSlider *passbandSlider;
 @property (nonatomic, strong) NSSlider *phaseSlider;
 @property (nonatomic, strong) NSTextField *passbandLabel;
@@ -42,17 +43,17 @@ static NSArray *sSpecialModes;
 - (instancetype)init {
     self = [super initWithNibName:nil bundle:nil];
     if (self) {
-        [self setPreferredContentSize:NSMakeSize(360, 300)];
+        [self setPreferredContentSize:NSMakeSize(360, 328)];
     }
     return self;
 }
 
 - (void)loadView {
-    NSView *view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 360, 300)];
+    NSView *view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 360, 328)];
     [view setWantsLayer:YES];
     view.layer.backgroundColor = [[NSColor windowBackgroundColor] CGColor];
 
-    CGFloat y = 270;
+    CGFloat y = 298;
     CGFloat labelW = 110, ctrlX = 120, ctrlW = 220, rowH = 28;
 
     // Sample rate
@@ -77,6 +78,14 @@ static NSArray *sSpecialModes;
     [_aliasCheckbox setButtonType:NSButtonTypeSwitch];
     [_aliasCheckbox setTitle:@"Allow aliasing/imaging"];
     [view addSubview:_aliasCheckbox];
+    y -= rowH;
+
+    // Output as 96 kHz (visible only when target rate is 93750 Hz)
+    _output96kCheckbox = [[NSButton alloc] initWithFrame:NSMakeRect(ctrlX, y, ctrlW, 20)];
+    [_output96kCheckbox setButtonType:NSButtonTypeSwitch];
+    [_output96kCheckbox setTitle:@"Output as 96 kHz"];
+    [_output96kCheckbox setHidden:YES];
+    [view addSubview:_output96kCheckbox];
     y -= rowH;
 
     // Passband
@@ -155,6 +164,8 @@ static NSArray *sSpecialModes;
     [_qualCombo selectItemAtIndex:(NSInteger)(_params->quality() - Qvalmin)];
 
     [_aliasCheckbox setState:(_params->aliasing() ? NSControlStateValueOn : NSControlStateValueOff)];
+    [_output96kCheckbox setState:(_params->output_as_96k() ? NSControlStateValueOn : NSControlStateValueOff)];
+    [self updateOutput96kVisible];
     [_passbandSlider setDoubleValue:_params->passband10()];
     [_phaseSlider setDoubleValue:_params->phase()];
     [self updatePassbandLabel];
@@ -191,11 +202,18 @@ static NSArray *sSpecialModes;
     }
 }
 
+- (void)updateOutput96kVisible {
+    NSString *rateStr = [_rateCombo stringValue];
+    [_output96kCheckbox setHidden:![rateStr isEqualToString:@"93750"]];
+}
+
 - (void)controlTextDidChange:(NSNotification *)notification {
+    [self updateOutput96kVisible];
     [self apply];
 }
 
 - (void)comboBoxSelectionDidChange:(NSNotification *)notification {
+    [self updateOutput96kVisible];
     [self apply];
 }
 
@@ -207,6 +225,7 @@ static NSArray *sSpecialModes;
 
     _params->set_quality((t_int32)([_qualCombo indexOfSelectedItem] >= 0 ? [_qualCombo indexOfSelectedItem] : 0) + Qvalmin);
     _params->set_aliasing([_aliasCheckbox state] == NSControlStateValueOn ? 1 : 0);
+    _params->set_output_as_96k([_output96kCheckbox state] == NSControlStateValueOn ? 1 : 0);
     _params->set_passband10((t_int32)[_passbandSlider doubleValue]);
     _params->set_phase((t_int32)[_phaseSlider doubleValue]);
     _params->set_specialmode((t_int32)([_specialModeCombo indexOfSelectedItem] >= 0 ? [_specialModeCombo indexOfSelectedItem] : 0));

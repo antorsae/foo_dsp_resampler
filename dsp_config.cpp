@@ -51,6 +51,7 @@ t_dsp_rate_params::t_dsp_rate_params()
     cfg_.specialMode    = 0;
     cfg_.specialRates.reset();
     cfg_.special_ranges.force_reset();
+    cfg_.output_as_96k  = 1;
 }
 
 void t_dsp_rate_params::get_rateconfig(RateConfig& cfg) const
@@ -94,6 +95,7 @@ bool t_dsp_rate_params::set_data(const dsp_preset& p_data)
     cfg_.passband10     = pfc::clip_t<t_int32>(cfg_.passband10, minPassband10, maxPassband10);
     cfg_.phase          = pfc::clip_t<t_int32>(cfg_.phase, Pminimum, Plinear);
 
+    cfg_.output_as_96k = 1; // default for old presets
     if (p_data.get_data_size() >= sizeof(temp) + 2*sizeof(t_int32)) { // Case's customizations
         try {
             const char *p = (const char *)p_data.get_data() + sizeof(temp);
@@ -103,6 +105,9 @@ bool t_dsp_rate_params::set_data(const dsp_preset& p_data)
             if (p_data.get_data_size() >= sizeof(temp) + 2 * sizeof(int) + len) {
                 cfg_.specialRates.set_string(p, len);
             }
+            if (p_data.get_data_size() >= sizeof(temp) + 2 * sizeof(int) + len + sizeof(t_int32)) {
+                memcpy(&cfg_.output_as_96k, p + len, sizeof(cfg_.output_as_96k));
+            }
         } catch (pfc::exception) {}
     }
 
@@ -111,7 +116,8 @@ bool t_dsp_rate_params::set_data(const dsp_preset& p_data)
 
 bool t_dsp_rate_params::get_data(dsp_preset &p_data) const
 {
-    const size_t config_size = (sizeof(t_int32) * (NParam + 2)) + cfg_.specialRates.get_length();
+    const size_t specialRates_len = cfg_.specialRates.get_length();
+    const size_t config_size = (sizeof(t_int32) * (NParam + 2)) + specialRates_len + sizeof(t_int32);
     unsigned char *data = new unsigned char[config_size];
     t_int32 *temp = (t_int32 *)data;
     temp[0] = cfg_.outRate;
@@ -121,12 +127,16 @@ bool t_dsp_rate_params::get_data(dsp_preset &p_data) const
     temp[4] = cfg_.phase;
 
     temp[5] = cfg_.specialMode;
-    temp[6] = cfg_.specialRates.get_length();
+    temp[6] = (t_int32)specialRates_len;
 
     p_data.set_owner(g_get_guid());
     for(int i=0; i<NParam; i++)
         byte_order::order_native_to_le_t(temp[i]);
-    memcpy(data + (sizeof(t_int32) * (NParam + 2)), cfg_.specialRates.get_ptr(), cfg_.specialRates.get_length());
+    unsigned char *p_tail = data + (sizeof(t_int32) * (NParam + 2));
+    memcpy(p_tail, cfg_.specialRates.get_ptr(), specialRates_len);
+    p_tail += specialRates_len;
+    t_int32 out96k = cfg_.output_as_96k;
+    memcpy(p_tail, &out96k, sizeof(out96k));
     p_data.set_data(data, config_size);
     delete[] data;
     return true;
@@ -214,6 +224,10 @@ BOOL dialog_dsp_rate::OnInitDialog(CWindow wndFocus, LPARAM lInitParam)
 
     aliasCheckbox.SetCheck(params_.aliasing() ? BST_CHECKED : BST_UNCHECKED);
 
+    CButton output96kCheck(GetDlgItem(IDC_OUTPUT_AS_96K));
+    output96kCheck.SetCheck(params_.output_as_96k() ? BST_CHECKED : BST_UNCHECKED);
+    UpdateOutput96kVisible();
+
     passbandSlider.SetRange(minPassband10, maxPassband10);
     passbandSlider.SetPos(params_.passband10());
     passbandSlider.SetTicFreq(tickPassband10);
@@ -231,6 +245,15 @@ BOOL dialog_dsp_rate::OnInitDialog(CWindow wndFocus, LPARAM lInitParam)
     m_hooks.AddDialogWithControls(m_hWnd);
 
     return 0;
+}
+
+void dialog_dsp_rate::UpdateOutput96kVisible()
+{
+    CComboBox rateCombo(GetDlgItem(IDC_RATE));
+    CButton output96kCheck(GetDlgItem(IDC_OUTPUT_AS_96K));
+    pfc::string8 str;
+    uGetWindowText(rateCombo, str);
+    output96kCheck.ShowWindow(strcmp(str.get_ptr(), "93750") == 0 ? SW_SHOW : SW_HIDE);
 }
 
 void dialog_dsp_rate::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar pScrollBar)
@@ -257,6 +280,11 @@ void dialog_dsp_rate::OnCommand(UINT uNotifyCode, int nID, CWindow wndCtl)
 {
     switch (nID)
     {
+    case IDC_RATE:
+        if (uNotifyCode == CBN_SELCHANGE || uNotifyCode == CBN_EDITCHANGE)
+            UpdateOutput96kVisible();
+        break;
+
     case IDOK:
         {
             //char str[STRMAXLEN];
@@ -273,6 +301,8 @@ void dialog_dsp_rate::OnCommand(UINT uNotifyCode, int nID, CWindow wndCtl)
 
             params_.set_quality(qualCombo.GetCurSel() + Qvalmin);
             params_.set_aliasing(aliasCheckbox.GetCheck() == BST_CHECKED ? 1 : 0);
+            CButton output96kCheck(GetDlgItem(IDC_OUTPUT_AS_96K));
+            params_.set_output_as_96k(output96kCheck.GetCheck() == BST_CHECKED ? 1 : 0);
             params_.set_passband10(passbandSlider.GetPos());
             params_.set_phase(phresponseSlider.GetPos());
 

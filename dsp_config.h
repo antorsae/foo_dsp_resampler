@@ -151,6 +151,7 @@ public:
     pfc::string8 specialRates;
     t_int32 specialMode; // 0: off, 1: include, 2: exclude
     pfc::array_t<range_t> special_ranges;
+    t_int32 output_as_96k; // resample to 93750 but tag chunks as 96000 for ASIO compatibility
 
     unsigned realrate(unsigned in_samplerate) const
     {
@@ -230,9 +231,11 @@ public:
         try {
             to.specialMode = specialMode;
             to.specialRates = specialRates;
+            to.output_as_96k = output_as_96k;
         } catch (pfc::exception) {
             to.specialMode = 0;
             to.specialRates.reset();
+            to.output_as_96k = 1;
         }
     }
 };
@@ -273,6 +276,7 @@ public:
 
     inline t_int32 specialmode() const { return (t_int32)cfg_.specialMode; }
     const pfc::string8 &SpecialRatesStr() const { return cfg_.specialRates; }
+    inline t_int32 output_as_96k() const { return cfg_.output_as_96k; }
 
     void tset_outRate(const char *rate);
     inline void set_outRate(t_int32 rate)
@@ -285,6 +289,7 @@ public:
     inline void set_phase(t_int32 ph){ cfg_.phase = ph; }
     inline void set_specialmode(t_int32 sm){ cfg_.specialMode = sm; }
     inline void set_specialrates(const char *str){ cfg_.specialRates = str; }
+    inline void set_output_as_96k(t_int32 v){ cfg_.output_as_96k = v; }
 };
 
 #ifdef _WIN32
@@ -307,6 +312,7 @@ private:
     fb2k::CCoreDarkModeHooks m_hooks;
 
     void update_phresponseText(char *buf, int sz, CStatic phresponseText, int val);
+    void UpdateOutput96kVisible();
 
 public:
     dialog_dsp_rate(t_dsp_rate_params& p_params) : params_(p_params) {}
