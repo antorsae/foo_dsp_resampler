@@ -61,10 +61,6 @@ void dsp_rate::ctor_init()
     is_preextrapolated_ = false;
     samples_in_buffer_ = 0;
     samples_dropped_ = 0;
-
-    out_buffer_2_ = nullptr; OUTBUF_SIZE_2_ = 0;
-    two_stage_96k_ = false;
-    N_samples_to_drop_2_ = samples_dropped_2_ = 0;
 }
 
 dsp_rate::dsp_rate()
@@ -92,7 +88,6 @@ dsp_rate::~dsp_rate()
 
     delete[] in_buffer_0; in_buffer_0 = NULL; INBUF_SIZE_0 = 0;
     delete[] out_buffer_; out_buffer_ = NULL; OUTBUF_SIZE_ = 0; BUF_CHANNELS_ = 0;
-    delete[] out_buffer_2_; out_buffer_2_ = nullptr; OUTBUF_SIZE_2_ = 0;
 }
 
 void dsp_rate::on_endoftrack(abort_callback & p_abort) { flushwrite(); }
@@ -114,9 +109,6 @@ void dsp_rate::reinit(unsigned sample_rate, unsigned channel_count, unsigned cha
             out_rate_ = sample_rate;
         }
     }
-
-    // Save the configured target rate (used below for the 96k ASIO workaround check).
-    const unsigned cfg_out_rate = out_rate_;
 
     RR_quality quality = RR_norm;
     int bit_accuracy = 20;
@@ -152,34 +144,7 @@ void dsp_rate::reinit(unsigned sample_rate, unsigned channel_count, unsigned cha
         rate_.open(&c2, channel_count);
     }
 
-    tagged_rate_ = (cfg_out_rate == 93750 && cfg_.output_as_96k && out_rate_ != sample_rate) ? 96000 : out_rate_;
-
-    // Two-stage mode: 44100→93750 (stage 1, correct pitch) then 93750→96000 (stage 2).
-    // Stage 2 produces 96000 samples/sec, creating a 2250/sec surplus over 93750 Hz ASIO
-    // consumption. This prevents buffer underruns (crackling) without any pitch change:
-    // digital frequency f/93750 cycles/sample is preserved through both stages, so
-    // playback at 93750 Hz hardware gives exactly the original pitch.
-    two_stage_96k_ = (cfg_out_rate == 93750 && cfg_.output_as_96k && out_rate_ != sample_rate);
-    samples_dropped_2_ = 0;
-    if (!two_stage_96k_) {
-        rate2_.close();
-        N_samples_to_drop_2_ = 0;
-    } else {
-        N_samples_to_drop_2_ = 96000;
-        unsigned n_add2 = 93750;
-        samples_len(&n_add2, &N_samples_to_drop_2_, 20, 8192u);
-        const RR_config c2 = {93750u, 96000u, double(cfg_.phase), double(cfg_.passband10) / 10.0,
-                               cfg_.allow_aliasing ? 1 : 0, quality, bit_accuracy};
-        try {
-            rate2_.open(&c2, channel_count);
-        } catch (const std::bad_alloc&) {
-            console::warning("SoX Resampler: out of memory for stage-2, 96k workaround disabled");
-            two_stage_96k_ = false;
-            tagged_rate_ = out_rate_;
-            rate2_.close();
-            N_samples_to_drop_2_ = 0;
-        }
-    }
+    tagged_rate_ = (out_rate_ == 93750 && cfg_.output_as_96k) ? 96000 : out_rate_;
 
     if (out_rate_ != sample_rate) {
         unsigned g = local_gcd(sample_rate, out_rate_);
@@ -197,7 +162,7 @@ void dsp_rate::reinit(unsigned sample_rate, unsigned channel_count, unsigned cha
             << "  phase=" << (int)cfg_.phase
             << (cfg_.allow_aliasing ? "  aliasing=on" : "")
             << "  ch=" << channel_count
-            << (two_stage_96k_ ? "  [ASIO: two-stage 93750->96000 Hz]" : "");
+            << (tagged_rate_ != out_rate_ ? "  [ASIO: chunks tagged as 96000 Hz]" : "");
     } else {
         FB2K_console_formatter() << "SoX Resampler: passthrough (" << sample_rate << " Hz)";
     }
@@ -231,25 +196,12 @@ void dsp_rate::reinit(unsigned sample_rate, unsigned channel_count, unsigned cha
         BUF_CHANNELS_ = new_buf_channels;
     }
 
-    // Allocate stage-2 output buffer (sized for 96000 Hz output + stage-2 priming)
-    if (two_stage_96k_) {
-        unsigned need2 = min(next_pow2(96000u / 10u, 8192u), 65536u) + N_samples_to_drop_2_;
-        delete[] out_buffer_2_;
-        out_buffer_2_ = new fb_sample_t[need2 * BUF_CHANNELS_];
-        OUTBUF_SIZE_2_ = need2;
-    } else {
-        delete[] out_buffer_2_; out_buffer_2_ = nullptr; OUTBUF_SIZE_2_ = 0;
-    }
-
     in_buffer_ = in_buffer_0 + N_samples_to_add_*channel_count_;
 }
 
 void dsp_rate::close()
 {
     rate_.close(); // rate_.is_initialised() == false
-    rate2_.close();
-    two_stage_96k_ = false;
-    samples_dropped_2_ = 0;
 
     in_samples_accum_ = out_samples_gen_accum_ = 0; // necessary?
 }
@@ -324,47 +276,20 @@ bool dsp_rate::on_chunk(audio_chunk * chunk, abort_callback & p_abort)
         }
         if (out_samples_gen)
         {
-            if (!two_stage_96k_) {
-                out_samples_gen_accum_ += (unsigned int)out_samples_gen;
-                audio_chunk *out = insert_chunk(out_samples_gen*channel_count_);
+            out_samples_gen_accum_ += (unsigned int)out_samples_gen;
+            audio_chunk *out = insert_chunk(out_samples_gen*channel_count_);
 #if audio_sample_size == fb_sample_t_bits
-                out->set_data(out_buffer_ + to_drop*channel_count_, out_samples_gen, channel_count_, tagged_rate_, channel_map_);
+            out->set_data(out_buffer_ + to_drop*channel_count_, out_samples_gen, channel_count_, tagged_rate_, channel_map_);
 #else
-                out->set_data_32(out_buffer_ + to_drop * channel_count_, out_samples_gen, audio_chunk::makeSpec(tagged_rate_, channel_count_, channel_map_));
+            out->set_data_32(out_buffer_ + to_drop * channel_count_, out_samples_gen, audio_chunk::makeSpec(tagged_rate_, channel_count_, channel_map_));
 #endif
-            } else {
-                // Push valid stage-1 output (93750 Hz) into stage-2 (93750→96000 Hz).
-                // Stage-2 produces a 2250/sec surplus that keeps the ASIO buffer filled.
-                rate2_.push(out_buffer_ + to_drop*channel_count_, out_samples_gen);
-                size_t s2_gen;
-                while (true) {
-                    rate2_.pull(out_buffer_2_, OUTBUF_SIZE_2_, &s2_gen);
-                    if (s2_gen == 0) break;
-                    unsigned to_drop2 = N_samples_to_drop_2_ - samples_dropped_2_;
-                    if (to_drop2) {
-                        to_drop2 = min(to_drop2, (unsigned)s2_gen);
-                        s2_gen -= to_drop2;
-                        samples_dropped_2_ += to_drop2;
-                    }
-                    if (s2_gen) {
-                        out_samples_gen_accum_ += (unsigned)s2_gen;
-                        audio_chunk *out = insert_chunk(s2_gen * channel_count_);
-#if audio_sample_size == fb_sample_t_bits
-                        out->set_data(out_buffer_2_ + to_drop2*channel_count_, s2_gen, channel_count_, tagged_rate_, channel_map_);
-#else
-                        out->set_data_32(out_buffer_2_ + to_drop2*channel_count_, s2_gen, audio_chunk::makeSpec(tagged_rate_, channel_count_, channel_map_));
-#endif
-                    }
-                }
-            }
         }
     } while (sample_count || out_samples_gen);
 
-    // Use tagged_rate_ (= 96000 in two-stage mode) so the latency ratio stays correct.
-    while (in_samples_accum_ > sample_rate_ && out_samples_gen_accum_ > tagged_rate_)
+    while (in_samples_accum_ > sample_rate_ && out_samples_gen_accum_ > out_rate_)
     {
         in_samples_accum_ -= sample_rate_;
-        out_samples_gen_accum_ -= tagged_rate_;
+        out_samples_gen_accum_ -= out_rate_;
     }
     return false;
 }
@@ -373,48 +298,6 @@ void dsp_rate::flush()
 {
     if (!rate_.is_initialized()) return;
     close();
-}
-
-// Drain rate2_ after all stage-1 output has been pushed, trimming both the start priming
-// (samples_dropped_2_ may be < N_samples_to_drop_2_ for short tracks) and the end tail
-// (N_samples_to_drop_2_ reserved, mirrors stage-1's end-tail trimming in flushwrite).
-void dsp_rate::flush_stage2()
-{
-    if (!two_stage_96k_ || !rate2_.is_initialized()) return;
-
-    rate2_.drain();
-
-    unsigned s2_buf = 0; // rolling accumulator: samples held for end-tail guard
-    while (true) {
-        size_t s2_gen;
-        rate2_.pull(out_buffer_2_ + s2_buf * channel_count_, OUTBUF_SIZE_2_ - s2_buf, &s2_gen);
-        if (s2_gen == 0) break;
-
-        // Drop start priming (only needed if track was too short to fully prime in on_chunk)
-        unsigned to_drop2 = N_samples_to_drop_2_ - samples_dropped_2_;
-        if (to_drop2) {
-            to_drop2 = min(to_drop2, (unsigned)s2_gen);
-            s2_gen -= to_drop2;
-            samples_dropped_2_ += to_drop2;
-            as_memmove2(out_buffer_2_, 0, out_buffer_2_, to_drop2, s2_gen);
-        }
-
-        s2_buf += (unsigned)s2_gen;
-        // Emit everything except the last N_samples_to_drop_2_ (end-tail trimming)
-        unsigned s2_avail = s2_buf - min(s2_buf, N_samples_to_drop_2_);
-        if (s2_avail) {
-            out_samples_gen_accum_ += s2_avail;
-            audio_chunk *out = insert_chunk(s2_avail * channel_count_);
-#if audio_sample_size == fb_sample_t_bits
-            out->set_data(out_buffer_2_, s2_avail, channel_count_, tagged_rate_, channel_map_);
-#else
-            out->set_data_32(out_buffer_2_, s2_avail, audio_chunk::makeSpec(tagged_rate_, channel_count_, channel_map_));
-#endif
-            s2_buf -= s2_avail;
-            as_memmove2(out_buffer_2_, 0, out_buffer_2_, s2_avail, s2_buf);
-        }
-    }
-    // Remaining s2_buf samples are the stage-2 filter ring-down — discard
 }
 
 void dsp_rate::flushwrite()
@@ -455,7 +338,6 @@ void dsp_rate::flushwrite()
 
         samples_dropped_ = 0;
         samples_in_buffer_ = 0;
-        samples_dropped_2_ = 0; // restart stage-2 priming (fresh push to stage-1)
         size_t out_samples_gen;
 
         while (1)
@@ -479,38 +361,17 @@ void dsp_rate::flushwrite()
             unsigned int /*size_t*/ avail = samples_in_buffer_ - min(samples_in_buffer_, N_samples_to_drop_);
             if (avail)
             {
-                if (!two_stage_96k_) {
-                    out_samples_gen_accum_ += avail;
-                    audio_chunk * out = insert_chunk(avail*channel_count_);
+                out_samples_gen_accum_ += avail;
+                audio_chunk * out = insert_chunk(avail*channel_count_);
 #if audio_sample_size == fb_sample_t_bits
-                    out->set_data(out_buffer_, avail, channel_count_, tagged_rate_, channel_map_);
+                out->set_data(out_buffer_, avail, channel_count_, tagged_rate_, channel_map_);
 #else
-                    out->set_data_32(out_buffer_, avail, audio_chunk::makeSpec(tagged_rate_, channel_count_, channel_map_));
+                out->set_data_32(out_buffer_, avail, audio_chunk::makeSpec(tagged_rate_, channel_count_, channel_map_));
 #endif
-                } else {
-                    rate2_.push(out_buffer_, avail);
-                    size_t s2_gen;
-                    while (true) {
-                        rate2_.pull(out_buffer_2_, OUTBUF_SIZE_2_, &s2_gen);
-                        if (s2_gen == 0) break;
-                        unsigned to_drop2 = N_samples_to_drop_2_ - samples_dropped_2_;
-                        if (to_drop2) { to_drop2 = min(to_drop2, (unsigned)s2_gen); s2_gen -= to_drop2; samples_dropped_2_ += to_drop2; }
-                        if (s2_gen) {
-                            out_samples_gen_accum_ += (unsigned)s2_gen;
-                            audio_chunk *out = insert_chunk(s2_gen * channel_count_);
-#if audio_sample_size == fb_sample_t_bits
-                            out->set_data(out_buffer_2_ + to_drop2*channel_count_, s2_gen, channel_count_, tagged_rate_, channel_map_);
-#else
-                            out->set_data_32(out_buffer_2_ + to_drop2*channel_count_, s2_gen, audio_chunk::makeSpec(tagged_rate_, channel_count_, channel_map_));
-#endif
-                        }
-                    }
-                }
                 samples_in_buffer_ -= avail; /* samples_in_buffer_ = N_samples_to_drop_ */
                 as_memmove2(out_buffer_, 0, out_buffer_, avail, samples_in_buffer_);
             }
         }
-        flush_stage2();
         close();
         return;
     }
@@ -541,35 +402,17 @@ void dsp_rate::flushwrite()
             unsigned int /*size_t*/ avail = samples_in_buffer_ - min(samples_in_buffer_, (N_samples_to_drop_ - to_drop));
             if (avail)
             {
-                if (!two_stage_96k_) {
-                    out_samples_gen_accum_ += avail;
-                    audio_chunk * out = insert_chunk(avail*channel_count_);
+                out_samples_gen_accum_ += avail;
+                audio_chunk * out = insert_chunk(avail*channel_count_);
 #if audio_sample_size == fb_sample_t_bits
-                    out->set_data(out_buffer_ + to_drop*channel_count_, avail, channel_count_, tagged_rate_, channel_map_);
+                out->set_data(out_buffer_ + to_drop*channel_count_, avail, channel_count_, tagged_rate_, channel_map_);
 #else
-                    out->set_data_32(out_buffer_ + to_drop*channel_count_, avail, audio_chunk::makeSpec(tagged_rate_, channel_count_, channel_map_));
+                out->set_data_32(out_buffer_ + to_drop*channel_count_, avail, audio_chunk::makeSpec(tagged_rate_, channel_count_, channel_map_));
 #endif
-                } else {
-                    // Stage-2 is already primed from on_chunk(); no start-priming drop needed here.
-                    rate2_.push(out_buffer_ + to_drop*channel_count_, avail);
-                    size_t s2_gen;
-                    while (true) {
-                        rate2_.pull(out_buffer_2_, OUTBUF_SIZE_2_, &s2_gen);
-                        if (s2_gen == 0) break;
-                        out_samples_gen_accum_ += (unsigned)s2_gen;
-                        audio_chunk *out = insert_chunk(s2_gen * channel_count_);
-#if audio_sample_size == fb_sample_t_bits
-                        out->set_data(out_buffer_2_, s2_gen, channel_count_, tagged_rate_, channel_map_);
-#else
-                        out->set_data_32(out_buffer_2_, s2_gen, audio_chunk::makeSpec(tagged_rate_, channel_count_, channel_map_));
-#endif
-                    }
-                }
                 samples_in_buffer_ -= avail; /* samples_in_buffer_ = N_samples_to_drop_ */
                 as_memmove2(out_buffer_, 0, out_buffer_, avail, samples_in_buffer_);
             }
         }
-        flush_stage2();
         close();
         return;
     }
@@ -577,13 +420,9 @@ void dsp_rate::flushwrite()
 
 double dsp_rate::get_latency()
 {
-    if (sample_rate_ && out_rate_) {
-        // In two-stage mode out_samples_gen_accum_ counts 96000 Hz samples, so divide by
-        // tagged_rate_ (96000). In normal mode tagged_rate_ == out_rate_, so this is equivalent.
-        const unsigned eff = tagged_rate_ ? tagged_rate_ : out_rate_;
-        return double(in_samples_accum_)/double(sample_rate_) - double(out_samples_gen_accum_)/double(eff);
-    }
-    return 0;
+    if (sample_rate_ && out_rate_)
+        return double(in_samples_accum_)/double(sample_rate_) - double(out_samples_gen_accum_)/double(out_rate_);
+    else return 0;
     // warning: sample_rate_ and out_rate_ can be from previous track (?),
     // but in_samples_accum_ == out_samples_gen_accum_ == 0, so it's ok.
 }
